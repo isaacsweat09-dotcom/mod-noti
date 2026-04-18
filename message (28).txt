@@ -1,0 +1,169 @@
+-- =====================
+-- MOD NOTIFIER CONFIG
+-- =====================
+local notificationMessage = "Staff detected"
+
+local Settings = {
+    CompactMode = false,
+    
+    NotifyOnJoin = true,
+    NotifyOnLeave = true,
+    NotifyExisting = true,
+
+    ManualCheckKey = Enum.KeyCode.F6 -- change this to whatever you want
+}
+
+
+-- =====================
+-- DO NOT TOUCH BEYOND THIS POINT!
+-- =====================
+
+local groupId = 40382415
+local specialUserIds = {
+    72521798, 7794444637, 2815508189,
+    6203233210, 555909464, 350124454, 5637396
+}
+
+local Players = game:GetService("Players")
+local StarterGui = game:GetService("StarterGui")
+local localPlayer = Players.LocalPlayer
+local UserInputService = game:GetService("UserInputService")
+
+local flaggedPlayers = {} -- keyed by UserId
+local activeStaffCount = 0
+
+local function safeNotify(title, text, icon)
+    task.spawn(function()
+        pcall(function()
+            StarterGui:SetCore("SendNotification", {
+                Title = title,
+                Text = text,
+                Icon = icon or "",
+                Duration = Settings.CompactMode and 5 or 8
+            })
+        end)
+    end)
+end
+
+task.delay(1, function()
+    safeNotify("Mod notifier ON", Settings.CompactMode and "" or "Monitoring staff activity")
+end)
+
+local function isSpecialUser(player)
+    return table.find(specialUserIds, player.UserId) ~= nil
+end
+
+local function staffTitle()
+    return notificationMessage .. " (" .. activeStaffCount .. " active)"
+end
+
+local function notify(player, action)
+    local avatar =
+        "rbxthumb://type=AvatarHeadShot&id=" .. player.UserId .. "&w=420&h=420"
+
+    if Settings.CompactMode then
+        safeNotify(
+            staffTitle(),
+            player.Name .. " " .. action,
+            avatar
+        )
+    else
+        safeNotify(
+            "Username: " .. player.Name,
+            staffTitle() .. " - " .. action,
+            avatar
+        )
+    end
+end
+
+-- =====================
+-- CORE LOGIC
+-- =====================
+local function checkPlayer(player, joined)
+    if player == localPlayer then return end
+    if flaggedPlayers[player.UserId] then return end -- dedupe
+
+    local isFlagged = false
+
+    pcall(function()
+        isFlagged = player:IsInGroup(groupId)
+    end)
+
+    if isFlagged or isSpecialUser(player) then
+        flaggedPlayers[player.UserId] = true
+        activeStaffCount += 1
+
+        if joined and Settings.NotifyOnJoin then
+            notify(player, "joined")
+        elseif not joined and Settings.NotifyExisting then
+            notify(player, "already in server")
+        end
+    end
+end
+
+-- =====================
+-- PLAYER HANDLERS
+-- =====================
+for _, player in ipairs(Players:GetPlayers()) do
+    checkPlayer(player, false)
+end
+
+Players.PlayerAdded:Connect(function(player)
+    task.wait(1)
+    checkPlayer(player, true)
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+    if flaggedPlayers[player.UserId] then
+        flaggedPlayers[player.UserId] = nil
+        activeStaffCount -= 1
+
+        if Settings.NotifyOnLeave then
+            notify(player, "left")
+        end
+    end
+end)
+
+local function manualStaffCheck()
+    local found = 0
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= localPlayer then
+            local isFlagged = false
+
+            pcall(function()
+                isFlagged = player:IsInGroup(groupId)
+            end)
+
+            if isFlagged or isSpecialUser(player) then
+                found += 1
+
+                -- If not already tracked, register them
+                if not flaggedPlayers[player.UserId] then
+                    flaggedPlayers[player.UserId] = true
+                    activeStaffCount += 1
+                end
+            end
+        end
+    end
+
+    if found > 0 then
+        safeNotify(
+            staffTitle(),
+            "Manual check: " .. found .. " staff detected"
+        )
+    else
+        safeNotify(
+            "Manual check",
+            "No staff detected"
+        )
+    end
+end
+
+UserInputService.InputBegan:Connect(function(input, gp)
+    if gp then return end
+
+    if input.KeyCode == Settings.ManualCheckKey then
+        manualStaffCheck()
+    end
+end)
